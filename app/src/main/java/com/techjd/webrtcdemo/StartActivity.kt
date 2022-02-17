@@ -24,9 +24,35 @@ class StartActivity : AppCompatActivity() {
 
         binding!!.start.setOnClickListener {
             start()
-
         }
 
+        binding!!.startMultiPeer.setOnClickListener {
+            startAnother()
+        }
+    }
+
+    private fun startAnother() {
+        Dexter.withContext(this)
+            .withPermissions(listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+            .withListener(object : MultiplePermissionsListener {
+                override fun onPermissionsChecked(report: MultiplePermissionsReport) {
+                    if (report.areAllPermissionsGranted()) {
+                        Intent(this@StartActivity, MultiPeerActivity::class.java).apply {
+                            startActivity(this)
+                        }
+                    } else {
+                        if (report.isAnyPermissionPermanentlyDenied) {
+                        }
+                    }
+                }
+
+                override fun onPermissionRationaleShouldBeShown(
+                    permissions: MutableList<PermissionRequest>?,
+                    token: PermissionToken?
+                ) {
+                    token?.continuePermissionRequest()
+                }
+            }).check()
     }
 
     private fun start() {
