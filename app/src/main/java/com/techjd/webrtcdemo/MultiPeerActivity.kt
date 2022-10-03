@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.annotation.RequiresApi
+import androidx.lifecycle.lifecycleScope
 import com.techjd.webrtcdemo.databinding.ActivityMainBinding
 import com.techjd.webrtcdemo.databinding.ActivityMultiPeerBinding
 import io.socket.client.IO
@@ -25,19 +26,20 @@ class MultiPeerActivity : AppCompatActivity() {
 
     private var binding: ActivityMultiPeerBinding? = null
     private var socket: Socket? = null
-    private var isInitiator = false
-    private var isChannelReady = false
-    private var isStarted = false
     private var isMuted = false
 
-    private var peerConnection: PeerConnection? = null
+    private var peerConnection1: PeerConnection? = null
+    private var peerConnection2: PeerConnection? = null
+
     private var rootEglBase: EglBase? = null
     private var factory: PeerConnectionFactory? = null
     private var videoTrackFromCamera: VideoTrack? = null
     private var audioTrackFromLocal: AudioTrack? = null
-    private var cameraVideoCapturer: CameraVideoCapturer? = null
     private var videoCapturer: VideoCapturer? = null
-    var cnt = 0
+
+    private var isUser1: Boolean = false
+    private var isUser2: Boolean = false
+    private var isUser3: Boolean = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMultiPeerBinding.inflate(layoutInflater)
@@ -65,135 +67,36 @@ class MultiPeerActivity : AppCompatActivity() {
                 socket = IO.socket("http://192.168.2.3:3000")
             }
             socket!!.on(Socket.EVENT_CONNECT) { args: Array<Any?>? ->
-                Log.d(TAG, "connectToSignallingServer: connect")
                 socket!!.emit("create or join", "foo")
-            }.on("ipaddr") { args: Array<Any?>? ->
-                Log.d(
-                    TAG,
-                    "connectToSignallingServer: ipaddr"
-                )
-            }.on(
-                "created"
-            ) { args: Array<Any?>? ->
-                Log.d(TAG, "connectToSignallingServer: created")
-                if (args != null) {
-                    for (arg in args) {
-                        Log.d(TAG, "connectToSignallingServer: $arg")
+            }.on("created") {
+                isUser1 = true
+            }.on("second") {
+                if (isUser1) {
+                    doCall1()
+                } else {
+                    isUser2 = true
+                    lifecycleScope.launch {
+                        delay(3000L)
+                        doAnswer1()
                     }
                 }
-                isInitiator = true
-            }.on("full") { args: Array<Any?>? ->
-                Log.d(
-                    TAG,
-                    "connectToSignallingServer: full"
-                )
-            }.on(
-                "join"
-            ) { args: Array<Any?>? ->
-                Log.d(TAG, "connectToSignallingServer: join")
-                Log.d(
-                    TAG,
-                    "connectToSignallingServer: Another peer made a request to join room"
-                )
-                Log.d(
-                    TAG,
-                    "connectToSignallingServer: This peer is the initiator of room"
-                )
-//                doCall()
-                isChannelReady = true
-            }.on("joined") { args: Array<Any?>? ->
-                Log.d(TAG, "connectToSignallingServer: joined ${args.toString()}")
-                isChannelReady = true
-            }.on("log") { args: Array<Any> ->
-                for (arg in args) {
-                    Log.d(TAG, "connectToSignallingServer: $arg")
+            }.on("third") {
+                if (isUser1) {
+                    doCall2()
                 }
-            }.on(
-                "message"
-            ) { args: Array<Any?>? ->
-                Log.d(
-                    TAG,
-                    "connectToSignallingServer: got a message"
-                )
-            }.on("out") {
-                Log.d(TAG, "connectToSignallingServer: Called Bye")
-//                peerConnection!!.close()
-                CoroutineScope(Dispatchers.Main).launch {
-                    withContext(Dispatchers.Main) {
-                        peerConnection!!.close()
-                        socket!!.disconnect()
-                        Toast.makeText(applicationContext, "Call Ended", Toast.LENGTH_LONG).show()
-//                        delay(2000L)
-                        super.onBackPressed()
+                if (isUser2) {
+                    lifecycleScope.launch {
+                        delay(2000L)
+                        doCall2()
                     }
                 }
-//                binding!!.remoteStream.setEnabled(false)
-//                binding!!.remoteStream.release()
-//                binding!!.remoteStream
-            }.on(
-                "message"
-            ) { args: Array<Any> ->
-                try {
-                    if (args[0] is String) {
-                        val message = args[0] as String
-                        if (message == "got user media") {
-                            Log.d(TAG, "connectToSignallingServer: Got User Media")
-                            maybeStart()
-                        }
-                    } else {
-                        val message = args[0] as JSONObject
-                        Log.d(TAG, "connectToSignallingServer: got message $message")
-                        if (message.getString("type") == "offer") {
-                            Log.d(
-                                TAG,
-                                "connectToSignallingServer: received an offer $isInitiator $isStarted"
-                            )
-                            if (!isInitiator!! && !isStarted!!) {
-                                maybeStart()
-                            }
-//                            doCall()
-                            peerConnection!!.setRemoteDescription(
-                                SimpleSdpObserver(),
-                                SessionDescription(
-                                    SessionDescription.Type.OFFER,
-                                    message.getString("sdp")
-                                )
-                            )
-                            doAnswer()
-                        } else if (message.getString("type") == "answer" && isStarted!!) {
-                            peerConnection!!.setRemoteDescription(
-                                SimpleSdpObserver(),
-                                SessionDescription(
-                                    SessionDescription.Type.ANSWER,
-                                    message.getString("sdp")
-                                )
-                            )
-                        } else if (message.getString("type") == "candidate" && isStarted!!) {
-                            Log.d(
-                                TAG,
-                                "connectToSignallingServer: receiving candidates"
-                            )
-                            val candidate = IceCandidate(
-                                message.getString("id"),
-                                message.getInt("label"),
-                                message.getString("candidate")
-                            )
-                            peerConnection!!.addIceCandidate(candidate)
-                        }
-                        /*else if (message === 'bye' && isStarted) {
-        handleRemoteHangup();
-    }*/
+                if (!isUser1 && !isUser2) {
+                    isUser3 = true
+                    lifecycleScope.launch {
+                        doAnswer2()
                     }
-                } catch (e: JSONException) {
-                    e.printStackTrace()
                 }
-            }.on(
-                Socket.EVENT_DISCONNECT
-            ) { args: Array<Any?>? ->
-                Log.d(
-                    TAG,
-                    "connectToSignallingServer: disconnect"
-                )
+
             }
             socket!!.connect()
         } catch (e: URISyntaxException) {
@@ -201,10 +104,10 @@ class MultiPeerActivity : AppCompatActivity() {
         }
     }
 
-    private fun doAnswer() {
-        peerConnection!!.createAnswer(object : SimpleSdpObserver() {
+    private fun doCall1() {
+        peerConnection1!!.createAnswer(object : SimpleSdpObserver() {
             override fun onCreateSuccess(sessionDescription: SessionDescription?) {
-                peerConnection!!.setLocalDescription(SimpleSdpObserver(), sessionDescription)
+                peerConnection1!!.setLocalDescription(SimpleSdpObserver(), sessionDescription)
                 val message = JSONObject()
                 try {
                     message.put("type", "answer")
@@ -217,33 +120,52 @@ class MultiPeerActivity : AppCompatActivity() {
         }, MediaConstraints())
     }
 
-    private fun maybeStart() {
-        Log.d(TAG, "maybeStart: $isStarted $isChannelReady")
-        if (!isStarted!! && isChannelReady!!) {
-            isStarted = true
-            if (isInitiator!!) {
-                doCall()
-            }
-        }
+    private fun doCall2() {
+
     }
 
-    private fun doCall() {
-        val sdpMediaConstraints = MediaConstraints()
-        peerConnection!!.createOffer(object : SimpleSdpObserver() {
-            override fun onCreateSuccess(sessionDescription: SessionDescription?) {
-                Log.d(TAG, "onCreateSuccess: ")
-                peerConnection!!.setLocalDescription(SimpleSdpObserver(), sessionDescription)
-                val message = JSONObject()
-                try {
-                    message.put("type", "offer")
-                    message.put("sdp", sessionDescription!!.description)
-                    sendMessage(message)
-                } catch (e: JSONException) {
-                    e.printStackTrace()
-                }
-            }
-        }, sdpMediaConstraints)
+    private fun doAnswer1() {
+
     }
+
+    private fun doAnswer2() {
+
+    }
+
+//    private fun doAnswer() {
+//        peerConnection!!.createAnswer(object : SimpleSdpObserver() {
+//            override fun onCreateSuccess(sessionDescription: SessionDescription?) {
+//                peerConnection!!.setLocalDescription(SimpleSdpObserver(), sessionDescription)
+//                val message = JSONObject()
+//                try {
+//                    message.put("type", "answer")
+//                    message.put("sdp", sessionDescription!!.description)
+//                    sendMessage(message)
+//                } catch (e: JSONException) {
+//                    e.printStackTrace()
+//                }
+//            }
+//        }, MediaConstraints())
+//    }
+
+
+//    private fun doCall() {
+//        val sdpMediaConstraints = MediaConstraints()
+//        peerConnection!!.createOffer(object : SimpleSdpObserver() {
+//            override fun onCreateSuccess(sessionDescription: SessionDescription?) {
+//                Log.d(TAG, "onCreateSuccess: ")
+//                peerConnection!!.setLocalDescription(SimpleSdpObserver(), sessionDescription)
+//                val message = JSONObject()
+//                try {
+//                    message.put("type", "offer")
+//                    message.put("sdp", sessionDescription!!.description)
+//                    sendMessage(message)
+//                } catch (e: JSONException) {
+//                    e.printStackTrace()
+//                }
+//            }
+//        }, sdpMediaConstraints)
+//    }
 
     private fun sendMessage(message: Any) {
         socket!!.emit("message", message)
@@ -263,9 +185,6 @@ class MultiPeerActivity : AppCompatActivity() {
         binding!!.rM2.setEnableHardwareScaler(true)
         binding!!.rM2.setMirror(true)
 
-        binding!!.rM3.init(rootEglBase!!.getEglBaseContext(), null)
-        binding!!.rM3.setEnableHardwareScaler(true)
-        binding!!.rM3.setMirror(true)
     }
 
     private fun initializePeerConnectionFactory() {
@@ -293,18 +212,20 @@ class MultiPeerActivity : AppCompatActivity() {
     }
 
     private fun initializePeerConnections() {
-        peerConnection = createPeerConnection(factory!!)
+        peerConnection1 = createPeerConnection1(factory!!)
+        peerConnection2 = createPeerConnection2(factory!!)
     }
+
 
     private fun startStreamingVideo() {
         val mediaStream = factory!!.createLocalMediaStream("ARDAMS")
         mediaStream.addTrack(videoTrackFromCamera)
         mediaStream.addTrack(audioTrackFromLocal)
-        peerConnection!!.addStream(mediaStream)
-        sendMessage("got user media")
+        peerConnection1!!.addStream(mediaStream)
+        peerConnection2!!.addStream(mediaStream)
     }
 
-    private fun createPeerConnection(factory: PeerConnectionFactory): PeerConnection? {
+    private fun createPeerConnection1(factory: PeerConnectionFactory): PeerConnection? {
         Log.d(TAG, "createPeerConnection: Called")
         val iceServers: ArrayList<PeerConnection.IceServer> = ArrayList()
         iceServers.add(PeerConnection.IceServer("stun:stun.l.google.com:19302"))
@@ -338,7 +259,7 @@ class MultiPeerActivity : AppCompatActivity() {
                     message.put("id", iceCandidate.sdpMid)
                     message.put("candidate", iceCandidate.sdp)
                     Log.d(TAG, "onIceCandidate: sending candidate $message")
-                    sendMessage(message)
+                    socket!!.emit("ice", message)
                 } catch (e: JSONException) {
                     e.printStackTrace()
                 }
@@ -348,22 +269,77 @@ class MultiPeerActivity : AppCompatActivity() {
                 Log.d(TAG, "onIceCandidatesRemoved: ")
             }
 
-            @RequiresApi(Build.VERSION_CODES.M)
             override fun onAddStream(mediaStream: MediaStream) {
                 Log.d(TAG, "onAddStream: " + mediaStream.videoTracks.size)
-                Log.d(TAG, "onAddStream cnttttttt: ${cnt}")
-                cnt++
-                isStarted = false
-//                mediaStream.videoTracks[0].addRenderer(VideoRenderer(binding!!.rM1))
-//                if (cnt == 0) {
-//                    mediaStream.videoTracks[0].addRenderer(VideoRenderer(binding!!.rM1))
-//                    cnt++
-//                } else if (cnt == 1) {
-//                    mediaStream.videoTracks[1].addRenderer(VideoRenderer(binding!!.rM2))
-//                }
+                if (isUser1 || isUser2 || isUser3) {
+                    mediaStream.videoTracks.first.addRenderer(VideoRenderer(binding!!.rM1))
+                }
+            }
 
-//                mediaStream.videoTracks[1].addRenderer(VideoRenderer(binding!!.rM2))
-//                mediaStream.videoTracks[2].addRenderer(VideoRenderer(binding!!.rM3))
+            override fun onRemoveStream(mediaStream: MediaStream) {
+                Log.d(TAG, "onRemoveStream: ")
+            }
+
+            override fun onDataChannel(dataChannel: DataChannel) {
+                Log.d(TAG, "onDataChannel: ")
+            }
+
+            override fun onRenegotiationNeeded() {
+                Log.d(TAG, "onRenegotiationNeeded: ")
+            }
+        }
+        return factory.createPeerConnection(rtcConfig, pcConstraints, pcObserver)
+    }
+
+    private fun createPeerConnection2(factory: PeerConnectionFactory): PeerConnection? {
+        Log.d(TAG, "createPeerConnection: Called")
+        val iceServers: ArrayList<PeerConnection.IceServer> = ArrayList()
+        iceServers.add(PeerConnection.IceServer("stun:stun.l.google.com:19302"))
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
+        val pcConstraints = MediaConstraints()
+        val pcObserver: PeerConnection.Observer = object : PeerConnection.Observer {
+            override fun onSignalingChange(signalingState: PeerConnection.SignalingState) {
+                Log.d(TAG, "onSignalingChange: ")
+            }
+
+            override fun onIceConnectionChange(iceConnectionState: PeerConnection.IceConnectionState) {
+                Log.d(TAG, "onIceConnectionChange: ")
+//                binding!!.remoteStream.setEnabled(false)
+//                binding!!.remoteStream.release()
+            }
+
+            override fun onIceConnectionReceivingChange(b: Boolean) {
+                Log.d(TAG, "onIceConnectionReceivingChange: ")
+            }
+
+            override fun onIceGatheringChange(iceGatheringState: PeerConnection.IceGatheringState) {
+                Log.d(TAG, "onIceGatheringChange: ")
+            }
+
+            override fun onIceCandidate(iceCandidate: IceCandidate) {
+                Log.d(TAG, "onIceCandidate: ")
+                val message = JSONObject()
+                try {
+                    message.put("type", "candidate")
+                    message.put("label", iceCandidate.sdpMLineIndex)
+                    message.put("id", iceCandidate.sdpMid)
+                    message.put("candidate", iceCandidate.sdp)
+                    Log.d(TAG, "onIceCandidate: sending candidate $message")
+                    socket!!.emit("ice", message)
+                } catch (e: JSONException) {
+                    e.printStackTrace()
+                }
+            }
+
+            override fun onIceCandidatesRemoved(iceCandidates: Array<IceCandidate>) {
+                Log.d(TAG, "onIceCandidatesRemoved: ")
+            }
+
+            override fun onAddStream(mediaStream: MediaStream) {
+                Log.d(TAG, "onAddStream: " + mediaStream.videoTracks.size)
+                if (isUser1 || isUser2) {
+                    mediaStream.videoTracks.first.addRenderer(VideoRenderer(binding!!.rM2))
+                }
             }
 
             override fun onRemoveStream(mediaStream: MediaStream) {
